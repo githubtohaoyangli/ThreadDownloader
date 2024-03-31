@@ -2,31 +2,36 @@ from argparse import ArgumentParser
 from os import rmdir, remove, makedirs, listdir, system
 from random import randint
 from threading import Thread, Lock, enumerate
+from time import sleep
 
 from requests import head, get
 from termcolor import cprint, colored
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
-from time import sleep
+
 ap = ArgumentParser('Thread Downloader', 'Download files quickly.',
-                    '''This is a thread downloader.
-  You can use it Download large file quickly.''')
-ap.add_argument('--file', '-f', type=str, required=True, help='URL')
+                    '''This is a thread downloader.\nYou can use it Download large file quickly.''')
+ap.add_argument('--URL', '-u', type=str, required=True, help='URL')
 ap.add_argument('--dir', '-d', type=str, required=True, help='Download dir')
 ap.add_argument('--thread-num', '-t', type=int, required=False, default=16, help='Thread num')
-meg=ap.add_mutually_exclusive_group()
-meg.add_argument('--shut','-S',action='store_true',required=False,help='Use "shutdown /p" to shutdown your computer.')
-meg.add_argument('--sleep','-s',action='store_true',required=False,help='Use "shutdown /h" to sleep your computer.')
-meg.add_argument('--reboot','-r',action='store_true',required=False,help='Use "shutdown /r /t 0" to sleep your computer.')
-ap.add_argument('--no-ssl-verify',action='store_false',required=False)
+meg = ap.add_mutually_exclusive_group()
+meg.add_argument('--shut', '-S', action='store_true', required=False,
+                 help='Use "shutdown /p" to shutdown your computer.')
+meg.add_argument('--sleep', '-s', action='store_true', required=False, help='Use "shutdown /h" to sleep your computer.')
+meg.add_argument('--reboot', '-r', action='store_true', required=False,
+                 help='Use "shutdown /r /t 0" to sleep your computer.')
+ap.add_argument('--no-ssl-verify', action='store_false', required=False)
 args = vars(ap.parse_args())
-del ap
+del ap, meg
 
 
 def download(url: str, _from: int, to: int, id):
     global rates, FILE
     rates.append(0)
-    reponse = get(url, headers={'Range': f"bytes={_from}-{to}"}, stream=True,verify=args['no_ssl_verify'])
+    reponse = get(url, headers={'Range': f"bytes={_from}-{to}",
+                                'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0"},
+                  stream=True, verify=args['no_ssl_verify'],
+                  proxies={'http': None, 'https': None})
     if reponse.ok:
         length = int(reponse.headers['Content-Length'])
         with open(TMPDIR + f'\\{id}', 'wb+') as file:
@@ -39,7 +44,7 @@ def download(url: str, _from: int, to: int, id):
         exit(1)
 
 
-def mktmpdir(downloaddir)->str:
+def mktmpdir(downloaddir) -> str:
     seed = hex(randint(0x100000, 0x999999)).lstrip("0x")
     tmp_dir = downloaddir + f'\\.tmp\\{seed}'
     try:
@@ -51,9 +56,8 @@ def mktmpdir(downloaddir)->str:
 
 disable_warnings(InsecureRequestWarning)
 
-
 cprint('Finding file...', 'green')
-reponse = head(args['file'], allow_redirects=True)
+reponse = head(args['URL'], allow_redirects=True)
 if not reponse.ok:
     cprint(f'Error:{reponse.status_code} {reponse.reason}', 'red')
     exit(1)
@@ -83,26 +87,27 @@ else:
     FILENAME = name
 del name, _name
 
-print('File found:' + colored(f'{reponse.url}', "blue"), 'Size:' + colored(f'{LENGTH} B', ),
+print('File found:' + colored(f'{FILENAME}', "blue"), 'Size:' + colored(f'{LENGTH} B', ),
       'Type:' + colored(f'{reponse.headers.get("Content-Type")}', 'grey'), sep='\n')
 if LENGTH == 0:
     cprint('URL is not right.', 'red')
     exit(1)
-ONELENGTH=(LENGTH-1)//args.get('thread_num')
+ONELENGTH = (LENGTH - 1) // args.get('thread_num')
 
 TMPDIR = mktmpdir(args.get('dir'))
 
-print(f"Progress(downloading):{0.0:.2f}%[", colored(f"{' ' * 50}", 'green'), "]", sep='', end='\r')
+# print(f"Progress(downloading):{0.0:.2f}%[", colored(f"{' ' * 50}", 'green'), "]", sep='', end='\r')
 rates = []
 i = -1
 lock = Lock()
-for i in range(args.get('thread_num')-1):
-    start,end=i*ONELENGTH,(i+1)*ONELENGTH
-    t = Thread(target=download, args=(reponse.url,start,end-1, i),daemon=False)
+for i in range(args.get('thread_num') - 1):
+    start, end = i * ONELENGTH, (i + 1) * ONELENGTH
+    t = Thread(target=download, args=(reponse.url, start, end - 1, i), daemon=True)
+    cprint(f'Start thread {i}/{args.get('thread_num')}', 'green',end='\r')
     t.start()
-    sleep(0.5)
-start,end=i*ONELENGTH,(i+1)*ONELENGTH
-t = Thread(target=download, args=(reponse.url,ONELENGTH*(i+1),LENGTH,i+1))
+    sleep(2)
+start, end = i * ONELENGTH, (i + 1) * ONELENGTH
+t = Thread(target=download, args=(reponse.url, ONELENGTH * (i + 1), LENGTH, i + 1))
 t.start()
 del i, t
 
@@ -139,9 +144,9 @@ except OSError:
 cprint('\nCopying is over.', 'green')
 cprint('\nAll is over.', 'green')
 
-if args.get('shut',False):
+if args.get('shut', False):
     system('shutdown /p')
-if args.get('sleep',False):
+if args.get('sleep', False):
     system('shutdown /h')
-if args.get('reboot',False):
+if args.get('reboot', False):
     system('shutdown /r /t 0')
