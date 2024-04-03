@@ -3,11 +3,7 @@ from os import rmdir, remove, makedirs, listdir, system
 from random import randint, uniform
 from threading import Thread, Lock, enumerate
 from time import sleep
-<<<<<<< HEAD
 import ctypes
-=======
-from cffi import FFI
->>>>>>> 0f600b1b3867441ca6af875025c7b18210b0a92a
 from requests import head, get
 from termcolor import cprint, colored
 from urllib3 import disable_warnings
@@ -62,18 +58,8 @@ def mktmpdir(downloaddir) -> str:
 
 disable_warnings(InsecureRequestWarning)
 
-<<<<<<< HEAD
 ctypes.windll.kernel32.SetThreadExecutionState(0x00000001)
 register(ctypes.windll.kernel32.SetThreadExecutionState,ctypes.c_uint(0))
-=======
-ffi=FFI()
-kernel32 = ffi.dlopen('kernel32.dll')
-SetThreadExecutionState = kernel32.SetThreadExecutionState
-SetThreadExecutionState.argtypes = [ffi.c_ulong]
-SetThreadExecutionState.restype = ffi.c_ulong
-SetThreadExecutionState(0x00000001 | 0x00000002)
-del ffi,kernel32,SetThreadExecutionState
->>>>>>> 0f600b1b3867441ca6af875025c7b18210b0a92a
 
 cprint('Finding file...', 'green')
 reponse = head(args['URL'], allow_redirects=True)
