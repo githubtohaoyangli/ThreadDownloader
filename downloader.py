@@ -1,13 +1,15 @@
 from argparse import ArgumentParser
 from os import rmdir, remove, makedirs, listdir, system
-from random import randint
+from random import randint, uniform
 from threading import Thread, Lock, enumerate
 from time import sleep
-
+import ctypes
 from requests import head, get
 from termcolor import cprint, colored
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
+from atexit import register
+
 
 ap = ArgumentParser('Thread Downloader', 'Download files quickly.',
                     '''This is a thread downloader.\nYou can use it Download large file quickly.''')
@@ -19,7 +21,7 @@ meg.add_argument('--shut', '-S', action='store_true', required=False,
                  help='Use "shutdown /p" to shutdown your computer.')
 meg.add_argument('--sleep', '-s', action='store_true', required=False, help='Use "shutdown /h" to sleep your computer.')
 meg.add_argument('--reboot', '-r', action='store_true', required=False,
-                 help='Use "shutdown /r /t 0" to sleep your computer.')
+                 help='Use "shutdown /r /t 0" to reboot your computer.')
 ap.add_argument('--no-ssl-verify', action='store_false', required=False)
 args = vars(ap.parse_args())
 del ap, meg
@@ -55,6 +57,9 @@ def mktmpdir(downloaddir) -> str:
 
 
 disable_warnings(InsecureRequestWarning)
+
+ctypes.windll.kernel32.SetThreadExecutionState(0x00000001)
+register(ctypes.windll.kernel32.SetThreadExecutionState,ctypes.c_uint(0))
 
 cprint('Finding file...', 'green')
 reponse = head(args['URL'], allow_redirects=True)
@@ -105,7 +110,7 @@ for i in range(args.get('thread_num') - 1):
     t = Thread(target=download, args=(reponse.url, start, end - 1, i), daemon=True)
     cprint(f'Start thread {i}/{args.get('thread_num')}', 'green',end='\r')
     t.start()
-    sleep(2)
+    sleep(uniform(0,5))
 start, end = i * ONELENGTH, (i + 1) * ONELENGTH
 t = Thread(target=download, args=(reponse.url, ONELENGTH * (i + 1), LENGTH, i + 1))
 t.start()
