@@ -1,11 +1,11 @@
 [tool.poetry]
 name = "ThreadDownloader"
 version = "1.0.0"
-description = ""
+description = "Thread Downloader,let downloading faster."
 authors = ["Little Piggeon <xiezichen2023@hotmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.10"
 requests = "^2.31.0"
 termcolor = "^2.4.0"
 
