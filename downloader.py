@@ -1,8 +1,10 @@
+# -*- coding: utf-8 -*-
 import ctypes
 from argparse import ArgumentParser
 from atexit import register
-from os import rmdir, remove, makedirs, listdir, system, _exit
-from random import randint, uniform
+from os import remove, listdir, system, _exit
+from random import uniform
+from tempfile import TemporaryDirectory
 from threading import Thread, enumerate
 from time import sleep
 
@@ -16,6 +18,7 @@ ap = ArgumentParser('Thread Downloader', 'Download files quickly.',
 ap.add_argument('--URL', '-u', type=str, required=True, help='URL')
 ap.add_argument('--dir', '-d', type=str, required=True, help='Download dir')
 ap.add_argument('--thread-num', '-t', type=int, required=False, default=16, help='Thread num')
+ap.add_argument('--retry', type=int, required=False, default=4, help='Retry num.')
 meg = ap.add_mutually_exclusive_group()
 meg.add_argument('--shut', '-S', action='store_true', required=False,
                  help='Use "shutdown /p" to shutdown your computer.')
@@ -25,13 +28,13 @@ meg.add_argument('--reboot', '-r', action='store_true', required=False,
 ap.add_argument('--no-ssl-verify', action='store_false', required=False, help='Skip SSL verify')
 ap.add_argument('--http-proxy', type=str, required=False, default=None)
 ap.add_argument('--https-proxy', type=str, required=False, default=None)
+ap.add_argument('--buffer', type=int, required=False, default=1048576, help='The buffering of downloading and copying')
 args = vars(ap.parse_args())
 del ap, meg
 
 
-def download(url: str, _from: int, to: int, id):
+def download(url: str, _from: int, to: int, id, retry=4):
     global rates, FILE
-    rates.append(0)
     reponse = get(url, headers={'Range': f"bytes={_from}-{to}",
                                 'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0"},
                   stream=True, verify=args['no_ssl_verify'],
@@ -39,18 +42,22 @@ def download(url: str, _from: int, to: int, id):
     if reponse.ok:
         try:
             length = int(reponse.headers['Content-Length'])
-            with open(TMPDIR + f'\\{id}', 'wb+', buffering=0) as file:
+            with open(tmpdir.name + f'\\{id}', 'wb+', buffering=buffer) as file:
                 finished = 0
                 for ch in reponse:
                     finished += file.write(ch)
                     rates[id] = finished / length
                 reponse.close()
         except Exception as err:
-            cprint(f"\n\nError:{err}", 'red')
-            _exit(1)
+            if retry == 0:
+                cprint(f"\n\nError:{err}", 'red')
+                _exit()
+            download(url, _from, to, id, retry - 1)
     else:
-        cprint(f'\n\nError:{reponse.status_code} {reponse.reason}', 'red')
-        _exit(1)
+        if retry == 0:
+            cprint(f'\n\nError:{reponse.status_code} {reponse.reason}', 'red')
+            _exit()
+        download(url, _from, to, id, retry - 1)
 
 
 def threads():
@@ -61,7 +68,7 @@ def threads():
         t.start()
         sleep(uniform(0, 2))
     start, end = i * ONELENGTH, (i + 1) * ONELENGTH
-    t = Thread(target=download, args=(reponse.url, ONELENGTH * (i + 1), LENGTH, i + 1))
+    t = Thread(target=download, args=(reponse.url, ONELENGTH * (i + 1), LENGTH, i + 1, args['retry']))
     t.start()
 
     del i, t
@@ -70,18 +77,15 @@ def threads():
             if not thread.is_alive(): thread.join()
 
 
-def mktmpdir(downloaddir) -> str:
-    seed = hex(randint(0x100000, 0x999999)).lstrip("0x")
-    tmp_dir = downloaddir + f'\\.tmp\\{seed}'
-    try:
-        makedirs(tmp_dir)
-        return tmp_dir
-    except FileExistsError:
-        return mktmpdir(downloaddir)
-
-
 @register
 def on_exit():
+    try:
+        tmpdir.cleanup()
+    except OSError:
+        cprint('\nTemp dir can\'t remove.', 'yellow')
+
+    ctypes.windll.kernel32.SetThreadExecutionState(ctypes.c_uint(0))
+
     if args.get('shut', False):
         system('shutdown /p')
     elif args.get('sleep', False):
@@ -93,7 +97,8 @@ def on_exit():
 disable_warnings(InsecureRequestWarning)
 
 ctypes.windll.kernel32.SetThreadExecutionState(0x00000001)
-register(ctypes.windll.kernel32.SetThreadExecutionState, ctypes.c_uint(0))
+
+buffer = args['buffer']
 
 cprint('Finding file...', 'green')
 reponse = head(args['URL'], allow_redirects=True, verify=args['no_ssl_verify'],
@@ -101,7 +106,7 @@ reponse = head(args['URL'], allow_redirects=True, verify=args['no_ssl_verify'],
 if not reponse.ok:
     cprint(f'Error:{reponse.status_code} {reponse.reason}', 'red')
     _exit(1)
-if reponse.headers.get('Accept-Ranges')=='bytes':
+if reponse.headers.get('Accept-Ranges') == 'bytes':
     cprint('Server support "Range" header.', 'green')
 else:
     cprint('This server can\'t threading download.', 'red')
@@ -130,41 +135,35 @@ if LENGTH == 0:
     _exit(1)
 ONELENGTH = (LENGTH - 1) // args.get('thread_num')
 
-TMPDIR = mktmpdir(args.get('dir'))
+tmpdir = TemporaryDirectory(dir=args['dir'])
 
-# print(f"Progress(downloading):{0.0:.2f}%[", colored(f"{' ' * 50}", 'green'), "]", sep='', end='\r')
-rates = []
+rates = {}
 
 Thread(target=threads, daemon=True).start()
 while True:
     try:
-        rate = sum(rates) / args['thread_num']
+        rate = sum(rates.values()) / args['thread_num']
     except ZeroDivisionError:
         rate = 0.0
-    print(f"Progress(downloading):{rate * 100:.2f}%[", colored(f"{round(rate * 50) * '—': <50}", 'green'),
-          f"]{len(enumerate()) - 2} threads", sep='', end='\r')
+    print(f"Progress(downloading):{rate * 100:.2f}%[", colored(f"{round(rate * 50) * '-': <50}", 'green'),
+          f"] {len(enumerate()) - 2} threads", sep='', end='\r')
     if rate == 1: break
 cprint('\nDownloading is over.', 'green')
 
-mfile = open(args.get('dir') + '\\' + FILENAME, 'wb', buffering=0)
-for i in range(0, listdir(TMPDIR).__len__()):
-    sfile = open(TMPDIR + '\\' + str(i), 'rb')
+mfile = open(args.get('dir') + '\\' + FILENAME, 'wb', buffering=buffer)
+for i in range(0, listdir(tmpdir.name).__len__()):
+    sfile = open(tmpdir.name + '\\' + str(i), 'rb')
     finished = 0
     while True:
-        data = sfile.read(1048576)
+        data = sfile.read(buffer)
         if not data: break
         finished += mfile.write(data)
         rate = finished / LENGTH
         print(f"Progress(copying {i + 1}/{args['thread_num']}):{rate * 100:.2f}%[",
-              colored(f"{round(rate * 50) * '—': <50}", 'green'), "]",
+              colored(f"{round(rate * 50) * '-': <50}", 'green'), "]",
               sep='', end='\r')
     sfile.close()
     remove(sfile.name)
     mfile.flush()
-try:
-    rmdir(TMPDIR)
-    rmdir(args.get('dir') + '\\.tmp')
-except OSError:
-    cprint('\nTemp dir can\'t remove.', 'yellow')
-cprint('\nCopying is over.', 'green')
-cprint('\nAll is over.', 'green')
+
+cprint('\nDone.', 'green')
