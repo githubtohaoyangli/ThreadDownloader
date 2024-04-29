@@ -7,6 +7,7 @@ from random import uniform
 from tempfile import TemporaryDirectory
 from threading import Thread, enumerate, active_count
 from time import sleep, time
+from urllib.parse import unquote_plus
 
 from requests import head, get
 from termcolor import cprint, colored
@@ -64,22 +65,22 @@ def download(url: str, _from: int, to: int, id, retry=4):
         except Exception as err:
             if retry == 0:
                 cprint(f"\n\nError:{err}", 'red')
-                _exit()
+                _exit(1)
             download(url, _from, to, id, retry - 1)
     else:
         if retry == 0:
             cprint(f'\n\nError:{reponse.status_code} {reponse.reason}', 'red')
-            _exit()
+            _exit(1)
         download(url, _from, to, id, retry - 1)
 
 
 def threads():
     i = -1
-    for i in range(0, args.get('thread_count') - 1):
+    for i in range(0, args['thread_count'] - 1):
         start, end = i * each, (i + 1) * each
         t = Thread(target=download, args=(reponse.url, start, end - 1, i), daemon=True)
         t.start()
-        sleep(uniform(0, 2))
+        sleep(uniform(1, 5))
     start, end = i * each, (i + 1) * each
     t = Thread(target=download, args=(reponse.url, each * (i + 1), LENGTH, i + 1, args['retry']))
     t.start()
@@ -135,7 +136,7 @@ else:
     _name = reponse.url[v1:v2]
 del v1, v2
 
-name = input(colored(f'Please enter the file name[{_name}]:'))
+name = unquote_plus(input(colored(f'Please enter the file name[{_name}]:')))
 if not name:
     FILENAME = _name
 else:
@@ -147,12 +148,13 @@ print('File name:' + colored(f'{FILENAME}', "blue"), 'Size:' + colored(f'{_LENGT
 if LENGTH == 0:
     cprint('File is empty.', 'red')
     _exit(1)
-each = (LENGTH - 1) // args.get('thread_count')
+each = LENGTH // args['thread_count']
 
 tmpdir = TemporaryDirectory(dir=args['dir'])
 
 size = 0
 
+print("Progress(downloading):")
 Thread(target=threads, daemon=True).start()
 while True:
     start_time = time()
@@ -165,25 +167,31 @@ while True:
     except ZeroDivisionError:
         speed = 0
         eta=0
-    print(
-        f"Progress(downloading): {active_count() - 2:03} threads {trans_byte_unit(speed):6}/s {trans_byte_unit(size):6}/{_LENGTH:6} {rate * 100:.2f}%[",
-        colored(f"{round(rate * 50) * '-': <50}", 'green'),
-        f"]",f'eta {trans_time_unit(eta)}', ' '*5, sep='', end='\r')
-    if rate == 1: break
+    print(f"\t{active_count() - 2:3} threads|",
+          colored(f"{trans_byte_unit(speed):^8}/s",'light_yellow'),"|",
+          colored(f"{trans_byte_unit(size):^8}/{_LENGTH:^8}",'light_blue'),"|",
+          colored(f"{rate * 100:3.2f}%",'light_grey'),"[",
+          colored(f"{round(rate * 50) * '-': <50}", 'light_green'),"]",
+          colored(f'eta {trans_time_unit(eta)}','blue'),'|'
+          ,sep='', end='\r')
+    if size>=LENGTH:
+        del rate,start_time,start_size
+        break
 cprint('\nDownloading is over.', 'green')
 
-mfile = open(args.get('dir') + '\\' + FILENAME, 'wb', buffering=buffer)
+mfile = open(args['dir'] + '\\' + FILENAME, 'wb', buffering=buffer)
 
+print("Progress(copying):")
 rate = 0
 finished = 0
-for i in range(0, listdir(tmpdir.name).__len__()):
+for i in range(args['thread_count']):
     sfile = open(tmpdir.name + '\\' + str(i), 'rb')
     while True:
         data = sfile.read(buffer)
         if not data: break
         finished += mfile.write(data)
         rate = finished / LENGTH
-        print(f"Progress(copying {i + 1}/{args['thread_count']}):{rate * 100:.2f}%[",
+        print(f"\t{rate * 100:.2f}%[",
               colored(f"{round(rate * 50) * '-': <50}", 'green'), "]",
               sep='', end='\r')
     sfile.close()

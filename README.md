@@ -17,9 +17,4 @@ This Program only works on Windows.I will try to let it can use on Linux and Mac
 
 ### 用法
 
-1、下载[PyPy3.10](https://downloads.python.org/pypy/pypy3.10-v7.3.15-win64.zip)，把它解压到一个目录下。
-2、按下Ctrl+X，点击“系统(Y)
-”，在页面上找到“高级系统设置”，点击“环境变量”。如果解压在用户目录下，需要在“XXX的用户变量”中操作；否则在“系统变量”中操作。新建一项，内容：<
-解压后的PyPy目录>。  
-3、下载<https://github.com/littlepiggeon/ThreadDownloader/archive/refs/heads/Windows.zip>，解压。  
-4、按下Win+R，输入cmd或powershell，输入“pypy <解压目录下downloader.pyd的路径> -u <链接> -d <文件下载到的目录>”即开始下载。
+在[Releases](https://github.com/littlepiggeon/releases/latest)上下载downloader.exe，再使用命令行运行。
