@@ -50,9 +50,7 @@ def trans_time_unit(s):
 
 def download(url: str, _from: int, to: int, id, retry=4):
     global FILE, size
-    reponse = get(url, headers={'Range': f"bytes={_from}-{to}",
-                                'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, "
-                                              "like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0"},
+    reponse = get(url, headers={'Range': f"bytes={_from}-{to}"},
                   stream=True, verify=args['no_ssl_verify'],
                   proxies={'http': args['http_proxy'], 'https': args['https_proxy']})
     if reponse.ok:
