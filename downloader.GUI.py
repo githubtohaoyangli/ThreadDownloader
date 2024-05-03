@@ -1,17 +1,18 @@
 from os.path import dirname
 from sys import exit
-from threading import Thread
 
 from PyQt6.QtCore import QRect
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QWidget, QGridLayout, QPushButton, QApplication, QLabel, QLineEdit, QSpinBox, QMessageBox, QProgressBar, QStatusBar
+from PyQt6.QtWidgets import QWidget, QGridLayout, QPushButton, QApplication, QLabel, QLineEdit, QSpinBox, QMessageBox, \
+    QProgressBar
+
 
 class App(QWidget):
     URL = ''
 
     def __init__(self):
         super().__init__()
-        self.setGeometry(QRect(100,100,350, 200))
+        self.setGeometry(QRect(100, 100, 350, 200))
         self.initUI()
         self.setStatusTip('Ready')
 
@@ -40,17 +41,17 @@ class App(QWidget):
         self.ps.clicked.connect(self.start)
         grid.addWidget(self.ps, 2, 0)
 
-        labPbDL=QLabel('Download')
+        labPbDL = QLabel('Download')
         grid.addWidget(labPbDL, 3, 0)
 
-        self.pbDL=QProgressBar()
-        grid.addWidget(self.pbDL,3,1,2,1)
+        self.pbDL = QProgressBar()
+        grid.addWidget(self.pbDL, 3, 1, 2, 1)
 
-        labPbWT=QLabel('Write')
-        grid.addWidget(labPbWT,4,0)
+        labPbWT = QLabel('Write')
+        grid.addWidget(labPbWT, 4, 0)
 
-        self.pbWT=QProgressBar()
-        grid.addWidget(self.pbWT,4,1,2,1)
+        self.pbWT = QProgressBar()
+        grid.addWidget(self.pbWT, 4, 1, 2, 1)
 
         self.setLayout(grid)
 
@@ -62,7 +63,6 @@ class App(QWidget):
             return
         # self.leURL.setReadOnly(True)
         # self.sbThreadCount.setReadOnly(True)
-
 
 
 app = QApplication([])

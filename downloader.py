@@ -2,10 +2,10 @@
 import ctypes
 from argparse import ArgumentParser
 from atexit import register
-from os import remove, listdir, system, _exit
+from os import remove, system, _exit
 from random import uniform
 from tempfile import TemporaryDirectory
-from threading import Thread, enumerate, active_count
+from threading import Thread, active_count
 from time import sleep, time
 from urllib.parse import unquote_plus
 
@@ -30,37 +30,42 @@ meg.add_argument('--reboot', '-r', action='store_true', required=False,
 ap.add_argument('--no-ssl-verify', action='store_false', required=False, help='Skip SSL verify')
 ap.add_argument('--http-proxy', type=str, required=False, default=None)
 ap.add_argument('--https-proxy', type=str, required=False, default=None)
-ap.add_argument('--buffer', type=int, required=False, default=1048576, help='The buffering of downloading and copying')
+ap.add_argument('--buffer', type=int, required=False, default=4096, help='The buffering of downloading and copying')
 args = vars(ap.parse_args())
 del ap, meg
 
 
 def trans_byte_unit(byte: int | float):
-    result=byte
-    for unit in ('K','M','G','T'):
-        result/=1024
-        if result<1024:return f'{result:.2f}{unit}'
+    if byte < 0: return '? K'
+    result = byte
+    for unit in ('K', 'M', 'G', 'T'):
+        result /= 1024
+        if result < 1024: return f'{result:.2f}{unit}'
 
 
 def trans_time_unit(s):
-    sec=int(s%60)
-    min=int((s//60)%60)
-    hou=int(s//60//60)
+    if s < 0: return '??:??:??'
+    sec = int(s % 60)
+    min = int((s // 60) % 60)
+    hou = int(s // 60 // 60)
+    if hou > 60: return f'++:{min:02}:{sec:02}'
     return f'{hou:02}:{min:02}:{sec:02}'
 
 
-def download(url: str, _from: int, to: int, id, retry=4):
-    global FILE, size
-    reponse = get(url, headers={'Range': f"bytes={_from}-{to}"},
+def download(url: str, _from: int, to: int, id: int, retry=4):
+    global rates
+    reponse = get(url, headers={'Range': f"bytes={_from}-{to}",
+                                'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"},
                   stream=True, verify=args['no_ssl_verify'],
                   proxies={'http': args['http_proxy'], 'https': args['https_proxy']})
     if reponse.ok:
         try:
-            length = int(reponse.headers['Content-Length'])
+            size = int(reponse.headers['Content-Length'])
+            finished = 0
             with open(tmpdir.name + f'\\{id}', 'wb+', buffering=buffer) as file:
-                finished = 0
-                for ch in reponse:
-                    size += file.write(ch)
+                for ch in reponse.iter_content(buffer):
+                    finished += file.write(ch)
+                    rates[id] = finished / size
                 reponse.close()
         except Exception as err:
             if retry == 0:
@@ -75,20 +80,24 @@ def download(url: str, _from: int, to: int, id, retry=4):
 
 
 def threads():
-    i = -1
-    for i in range(0, args['thread_count'] - 1):
-        start, end = i * each, (i + 1) * each
-        t = Thread(target=download, args=(reponse.url, start, end - 1, i), daemon=True)
+    global rates, over
+    ts = []
+    for i in range(args['thread_count']):
+        start = each * i
+        if i == args['thread_count']:
+            end = LENGTH
+        else:
+            end = start + each
+        rates[i] = 0
+        t = Thread(target=download, args=(reponse.url, start, end - 1, i), daemon=True, name=f'Download {i}')
         t.start()
-        sleep(uniform(1, 5))
-    start, end = i * each, (i + 1) * each
-    t = Thread(target=download, args=(reponse.url, each * (i + 1), LENGTH, i + 1, args['retry']))
-    t.start()
-
-    del i, t
-    while True:
-        for thread in enumerate():
-            if not thread.is_alive(): thread.join()
+        ts.append(t)
+        uniform(1, 5)
+    del start, end, i
+    for i in ts:
+        i.join()
+    over = True
+    exit(0)
 
 
 @register
@@ -114,36 +123,43 @@ ctypes.windll.kernel32.SetThreadExecutionState(0x00000001)
 
 buffer = args['buffer']
 
-cprint('Connecting to the server...', 'green')
-reponse = head(args['URL'], allow_redirects=True, verify=args['no_ssl_verify'],
+cprint('Connecting to the server...', 'green',end='\r')
+reponse = head(args['URL'], headers={
+    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"},
+               allow_redirects=True, verify=args['no_ssl_verify'],
                proxies={'http': args['http_proxy'], 'https': args['https_proxy']})
 if not reponse.ok:
     cprint(f'Error:{reponse.status_code} {reponse.reason}', 'red')
     _exit(1)
 if reponse.headers.get('Accept-Ranges') == 'bytes':
-    cprint('Server support "Range" header.', 'green')
+    pass
 else:
     cprint('This server can\'t threading download.', 'red')
     _exit(1)
 LENGTH = int(reponse.headers.get('Content-Length', 0))
 _LENGTH = trans_byte_unit(LENGTH)
 
-v1 = reponse.url.rfind('/') + 1
-v2 = reponse.url.rfind('?', v1)
-if v2 == -1:
-    _name = reponse.url[v1:].rstrip('?')
+cp:str=reponse.headers.get('Content-Disposition','')
+if cp.startswith('attachment;'):
+    _name = cp.split('filename=')[1].strip('"\'')
 else:
-    _name = reponse.url[v1:v2]
-del v1, v2
+    v1 = reponse.url.rfind('/') + 1
+    v2 = reponse.url.rfind('?', v1)
+    if v2 == -1:
+        _name = reponse.url[v1:].rstrip('?')
+    else:
+        _name = reponse.url[v1:v2]
+    del v1, v2
 
-name = unquote_plus(input(colored(f'Please enter the file name[{_name}]:')))
+_name = unquote_plus(_name)
+name = input(colored(f'Please enter the file name(enter to default:"{_name}"):'))
 if not name:
     FILENAME = _name
 else:
     FILENAME = name
 del name, _name
 
-print('File name:' + colored(f'{FILENAME}', "blue"), 'Size:' + colored(f'{_LENGTH} B', 'blue'),
+print('File name:' + colored(f'{FILENAME}', "blue"), 'Size:' + colored(f'{_LENGTH}B', 'blue'),
       'Type:' + colored(f'{reponse.headers.get("Content-Type")}', 'blue'), sep='\n')
 if LENGTH == 0:
     cprint('File is empty.', 'red')
@@ -152,30 +168,30 @@ each = LENGTH // args['thread_count']
 
 tmpdir = TemporaryDirectory(dir=args['dir'])
 
-size = 0
-
+rates = {}
+over = False
 print("Progress(downloading):")
 Thread(target=threads, daemon=True).start()
 while True:
     start_time = time()
-    start_size = size
-    rate = size / LENGTH
-    sleep(0.5)
+    start_rate = sum(rates.values()) / args['thread_count']
+    sleep(0.3)
     try:
-        speed = (size - start_size) / (time() - start_time)
-        eta=(LENGTH-size)/speed
+        speed = (sum(rates.values()) / args['thread_count'] - start_rate) / (time() - start_time)
+        eta = (1 - sum(rates.values()) / args['thread_count']) / speed
     except ZeroDivisionError:
         speed = 0
-        eta=0
+        eta = 0
+
+    rate = sum(rates.values()) / args['thread_count']
     print(f"\t{active_count() - 2:3} threads|",
-          colored(f"{trans_byte_unit(speed):^8}/s",'light_yellow'),"|",
-          colored(f"{trans_byte_unit(size):^8}/{_LENGTH:^8}",'light_blue'),"|",
-          colored(f"{rate * 100:3.2f}%",'light_grey'),"[",
-          colored(f"{round(rate * 50) * '-': <50}", 'light_green'),"]",
-          colored(f'eta {trans_time_unit(eta)}','blue'),'|'
-          ,sep='', end='\r')
-    if size>=LENGTH:
-        del rate,start_time,start_size
+          colored(f"{speed * 100:3.3f}%/s", 'light_yellow'), "|",
+          colored(f"{rate * 100:3.2f}%", 'grey'), "[",
+          colored(f"{round(rate * 50) * '-':-<50}", 'light_green'), "]",
+          colored(f'eta {trans_time_unit(eta)}', 'blue'), '|',
+          sep='', end='\r')
+    if over:
+        del rate, start_time, start_rate, rates
         break
 cprint('\nDownloading is over.', 'green')
 
@@ -192,7 +208,7 @@ for i in range(args['thread_count']):
         finished += mfile.write(data)
         rate = finished / LENGTH
         print(f"\t{rate * 100:.2f}%[",
-              colored(f"{round(rate * 50) * '-': <50}", 'green'), "]",
+              colored(f"{round(rate * 50) * '-':-<50}", 'green'), "]",
               sep='', end='\r')
     sfile.close()
     remove(sfile.name)
