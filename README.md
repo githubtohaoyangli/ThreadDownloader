@@ -18,3 +18,7 @@ This Program only works on Windows.I will try to let it can use on Linux and Mac
 ### 用法
 
 在[Releases](https://github.com/littlepiggeon/releases/latest)上下载downloader.exe，再使用命令行运行。
+常用参数：  
+-U,--URL 下载链接  
+-d,--dir 保存目录  
+-t,--thread-count 线程数（通常十几到几十个，如果对多线程下载没有概念的话不要超过一百个）

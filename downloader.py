@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 import ctypes
+import curses
 from argparse import ArgumentParser
 from atexit import register
 from os import remove, system, _exit
+from os.path import join
 from random import uniform
 from tempfile import TemporaryDirectory
 from threading import Thread, active_count
@@ -10,27 +12,30 @@ from time import sleep, time
 from urllib.parse import unquote_plus
 
 from requests import head, get
-from termcolor import cprint, colored
+from termcolor import cprint
 from urllib3 import disable_warnings
-from urllib3.exceptions import InsecureRequestWarning
 
 ap = ArgumentParser('Thread Downloader', 'Download files quickly.',
                     '''This is a thread downloader.\nYou can use it Download large file quickly.''')
 ap.add_argument('--URL', '-u', type=str, required=True, help='URL')
 ap.add_argument('--dir', '-d', type=str, required=True, help='Download dir')
-ap.add_argument('--thread-count', '-t', type=int, required=False, default=16, choices=range(1, 1000),
+ap.add_argument('--thread-count', '-t', type=int, required=False, default=16,
                 help='Thread count')
 ap.add_argument('--retry', type=int, required=False, default=4, help='Retry num.')
 meg = ap.add_mutually_exclusive_group()
-meg.add_argument('--shut', '-S', action='store_true', required=False,
+meg.add_argument('--shutdown', '-S', action='store_true', required=False,
                  help='Use "shutdown /p" to shutdown your computer.')
-meg.add_argument('--sleep', '-s', action='store_true', required=False, help='Use "shutdown /h" to sleep your computer.')
+meg.add_argument('--sleep', '-s', action='store_true', required=False,
+                 help='Use WindowsAPI to sleep your computer.')
+meg.add_argument('--hibernation', '-H', action='store_true', required=False,
+                 help='Use "shutdown /h" to hibernation your computer.')
 meg.add_argument('--reboot', '-r', action='store_true', required=False,
                  help='Use "shutdown /r /t 0" to reboot your computer.')
 ap.add_argument('--no-ssl-verify', action='store_false', required=False, help='Skip SSL verify')
 ap.add_argument('--http-proxy', type=str, required=False, default=None)
 ap.add_argument('--https-proxy', type=str, required=False, default=None)
-ap.add_argument('--buffer', type=int, required=False, default=4096, help='The buffering of downloading and copying')
+ap.add_argument('--buffer', type=int, required=False, default=16384,
+                help='The buffering of downloading and copying')
 args = vars(ap.parse_args())
 del ap, meg
 
@@ -53,19 +58,22 @@ def trans_time_unit(s):
 
 
 def download(url: str, _from: int, to: int, id: int, retry=4):
-    global rates
+    global rates, size
     reponse = get(url, headers={'Range': f"bytes={_from}-{to}",
-                                'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"},
+                                'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, "
+                                              "like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"},
                   stream=True, verify=args['no_ssl_verify'],
                   proxies={'http': args['http_proxy'], 'https': args['https_proxy']})
     if reponse.ok:
         try:
-            size = int(reponse.headers['Content-Length'])
+            size_total = int(reponse.headers['Content-Length'])
             finished = 0
-            with open(tmpdir.name + f'\\{id}', 'wb+', buffering=buffer) as file:
-                for ch in reponse.iter_content(buffer):
-                    finished += file.write(ch)
-                    rates[id] = finished / size
+            with open(join(tmpdir.name, f'{id}.tmp'), 'wb+', buffering=buffer) as file:
+                for ch in reponse:
+                    added = file.write(ch)
+                    size += added
+                    finished += added
+                    rates[id] = finished / size_total
                 reponse.close()
         except Exception as err:
             if retry == 0:
@@ -85,11 +93,11 @@ def threads():
     for i in range(args['thread_count']):
         start = each * i
         if i == args['thread_count']:
-            end = LENGTH
+            end = total
         else:
             end = start + each
         rates[i] = 0
-        t = Thread(target=download, args=(reponse.url, start, end - 1, i), daemon=True, name=f'Download {i}')
+        t = Thread(target=download, args=(response.url, start, end - 1, i), daemon=True, name=f'Download {i}')
         t.start()
         ts.append(t)
         uniform(1, 5)
@@ -104,114 +112,141 @@ def threads():
 def on_exit():
     try:
         tmpdir.cleanup()
-    except OSError:
+    except:
         cprint('\nTemp dir can\'t remove.', 'yellow')
 
-    ctypes.windll.kernel32.SetThreadExecutionState(ctypes.c_uint(0))
+    SetThreadExecutionState(0x80000000)
 
     if args.get('shut', False):
         system('shutdown /p')
     elif args.get('sleep', False):
+        SetSystemPowerState = ctypes.windll.kernel32.SetSystemPowerState
+        SetSystemPowerState.argtypes = [ctypes.c_wchar_p, ctypes.c_bool]
+        SetSystemPowerState.restype = ctypes.c_bool
+        SetSystemPowerState(u'Monitor-timeout', True)
+
+    elif args.get('hibernation', False):
         system('shutdown /h')
     elif args.get('reboot', False):
         system('shutdown /r /t 0')
+    curses.nocbreak()
+    stdscr.keypad(False)
+    curses.echo()
+    curses.endwin()
+    cprint('Done.', 'green')
 
 
-disable_warnings(InsecureRequestWarning)
+disable_warnings()
 
-ctypes.windll.kernel32.SetThreadExecutionState(0x00000001)
+SetThreadExecutionState = ctypes.windll.kernel32.SetThreadExecutionState
+SetThreadExecutionState.argtypes = [ctypes.c_uint32]
+SetThreadExecutionState.restype = ctypes.c_uint32
+SetThreadExecutionState(0x00000001 | 0x80000000)
 
 buffer = args['buffer']
 
-cprint('Connecting to the server...', 'green',end='\r')
-reponse = head(args['URL'], headers={
-    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"},
-               allow_redirects=True, verify=args['no_ssl_verify'],
-               proxies={'http': args['http_proxy'], 'https': args['https_proxy']})
-if not reponse.ok:
-    cprint(f'Error:{reponse.status_code} {reponse.reason}', 'red')
-    _exit(1)
-if reponse.headers.get('Accept-Ranges') == 'bytes':
+stdscr = curses.initscr()
+curses.start_color()
+curses.curs_set(False)
+
+stdscr.addstr(curses.LINES // 5, curses.COLS // 5, 'Connecting to the server...', curses.color_pair(2))
+stdscr.refresh()
+response = head(args['URL'], headers={
+    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 "
+                  "Safari/537.36 Edg/124.0.0.0"},
+                allow_redirects=True, verify=args['no_ssl_verify'],
+                proxies={'http': args['http_proxy'], 'https': args['https_proxy']})
+if not response.ok:
+    stdscr.clear()
+    stdscr.addstr(curses.LINES // 5, curses.COLS // 5, f'Error:{response.status_code} {response.reason}',
+                  curses.color_pair(2))
+    stdscr.refresh()
+    exit(1)
+if response.headers.get('Accept-Ranges') == 'bytes':
     pass
 else:
-    cprint('This server can\'t threading download.', 'red')
-    _exit(1)
-LENGTH = int(reponse.headers.get('Content-Length', 0))
-_LENGTH = trans_byte_unit(LENGTH)
+    stdscr.clear()
+    stdscr.addstr(curses.LINES // 2, curses.COLS // 5, 'This server can\'t threading download.', curses.color_pair(2))
+    stdscr.refresh()
+    exit(1)
+total = int(response.headers.get('Content-Length', 0))
+_total = trans_byte_unit(total)
 
-cp:str=reponse.headers.get('Content-Disposition','')
-if cp.startswith('attachment;'):
-    _name = cp.split('filename=')[1].strip('"\'')
+cd: str = response.headers.get('Content-Disposition', '')
+if cd.startswith('attachment;'):
+    _name = cd.split('filename=')[1].strip('"\'')
 else:
-    v1 = reponse.url.rfind('/') + 1
-    v2 = reponse.url.rfind('?', v1)
+    v1 = response.url.rfind('/') + 1
+    v2 = response.url.rfind('?', v1)
     if v2 == -1:
-        _name = reponse.url[v1:].rstrip('?')
+        _name = response.url[v1:].rstrip('?')
     else:
-        _name = reponse.url[v1:v2]
+        _name = response.url[v1:v2]
     del v1, v2
 
 _name = unquote_plus(_name)
-name = input(colored(f'Please enter the file name(enter to default:"{_name}"):'))
+stdscr.clear()
+stdscr.addstr(curses.LINES // 5, curses.LINES // 5, f'Please enter the file name(default by"{_name}"):')
+stdscr.refresh()
+curses.curs_set(True)
+name = stdscr.getstr().decode()
+curses.curs_set(False)
 if not name:
     FILENAME = _name
 else:
     FILENAME = name
 del name, _name
 
-print('File name:' + colored(f'{FILENAME}', "blue"), 'Size:' + colored(f'{_LENGTH}B', 'blue'),
-      'Type:' + colored(f'{reponse.headers.get("Content-Type")}', 'blue'), sep='\n')
-if LENGTH == 0:
-    cprint('File is empty.', 'red')
-    _exit(1)
-each = LENGTH // args['thread_count']
+stdscr.clear()
+stdscr.addstr(0, curses.COLS // 5, 'File name:' + f'{FILENAME}')
+stdscr.addstr(1, curses.COLS // 5, 'Size:' + f'{_total}B')
+stdscr.addstr(2, curses.COLS // 5, 'Type:' + response.headers.get("Content-Type"))
+stdscr.refresh()
+if total == 0:
+    stdscr.addstr(4, curses.COLS // 5, 'File is empty.', curses.color_pair(1))
+    stdscr.refresh()
+    exit(1)
+each = total // args['thread_count']
 
 tmpdir = TemporaryDirectory(dir=args['dir'])
 
 rates = {}
 over = False
-print("Progress(downloading):")
+stdscr.addstr(5, curses.COLS // 5, "Downloading:")
 Thread(target=threads, daemon=True).start()
 while True:
     start_time = time()
-    start_rate = sum(rates.values()) / args['thread_count']
+    size = 0
     sleep(0.3)
     try:
-        speed = (sum(rates.values()) / args['thread_count'] - start_rate) / (time() - start_time)
-        eta = (1 - sum(rates.values()) / args['thread_count']) / speed
+        speed = size / (time() - start_time)
     except ZeroDivisionError:
         speed = 0
-        eta = 0
 
     rate = sum(rates.values()) / args['thread_count']
-    print(f"\t{active_count() - 2:3} threads|",
-          colored(f"{speed * 100:3.3f}%/s", 'light_yellow'), "|",
-          colored(f"{rate * 100:3.2f}%", 'grey'), "[",
-          colored(f"{round(rate * 50) * '-':-<50}", 'light_green'), "]",
-          colored(f'eta {trans_time_unit(eta)}', 'blue'), '|',
-          sep='', end='\r')
+    stdscr.addstr(6, curses.COLS // 4, f"{active_count() - 2:3} threads")
+    stdscr.addstr(7, curses.COLS // 4, f"{trans_byte_unit(speed):^8}/s")
+    stdscr.addstr(8, curses.COLS // 4, f"{rate * 100:6.2f}%")
+    stdscr.addstr(9, curses.COLS // 4, f"{round(rate * 50) * '▌':=<50}", curses.color_pair(2))
+    stdscr.refresh()
     if over:
-        del rate, start_time, start_rate, rates
+        del rate, start_time, rates
         break
-cprint('\nDownloading is over.', 'green')
 
 mfile = open(args['dir'] + '\\' + FILENAME, 'wb', buffering=buffer)
 
-print("Progress(copying):")
+stdscr.addstr(10, curses.COLS // 5, "Copying:")
 rate = 0
 finished = 0
 for i in range(args['thread_count']):
-    sfile = open(tmpdir.name + '\\' + str(i), 'rb')
+    sfile = open(join(tmpdir.name, f'{i}.tmp'), 'rb')
     while True:
         data = sfile.read(buffer)
         if not data: break
         finished += mfile.write(data)
-        rate = finished / LENGTH
-        print(f"\t{rate * 100:.2f}%[",
-              colored(f"{round(rate * 50) * '-':-<50}", 'green'), "]",
-              sep='', end='\r')
+        rate = finished / total
+        stdscr.addstr(11, curses.COLS // 4, f"{rate * 100:.2f}%{round(rate * 50) * '=':-<50}")
+        stdscr.refresh()
     sfile.close()
     remove(sfile.name)
     mfile.flush()
-
-cprint('\nDone.', 'green')
